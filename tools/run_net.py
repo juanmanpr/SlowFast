@@ -37,6 +37,5 @@ def main():
     if cfg.DEMO.ENABLE:
         demo(cfg)
 
-
 if __name__ == "__main__":
     main()

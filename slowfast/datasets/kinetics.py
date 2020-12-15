@@ -6,10 +6,12 @@ import random
 import torch
 import torch.utils.data
 from fvcore.common.file_io import PathManager
+import h5py
 
 import slowfast.utils.logging as logging
 
 from . import decoder as decoder
+from . import image_decoder as image_decoder
 from . import utils as utils
 from . import video_container as container
 from .build import DATASET_REGISTRY
@@ -71,7 +73,11 @@ class Kinetics(torch.utils.data.Dataset):
             )
 
         logger.info("Constructing Kinetics {}...".format(mode))
-        self._construct_loader()
+        self.use_hdf5 = True
+        if self.use_hdf5:
+            self._construct_loader_hdf5()
+        else:
+            self._construct_loader()
 
     def _construct_loader(self):
         """
@@ -112,6 +118,92 @@ class Kinetics(torch.utils.data.Dataset):
             "Constructing kinetics dataloader (size: {}) from {}".format(
                 len(self._path_to_videos), path_to_file
             )
+        )
+        
+    def _construct_loader_hdf5(self):
+        """
+        Construct the video loader from hdf5.
+        """
+        mode_name = 'train' if self.mode == 'train' else 'val'
+        data_file_name = f'{mode_name}.txt'
+        fps_data_file_name = f'{mode_name}_fps.txt'
+        path_prefix = f'seq_h5_450x340/{mode_name}'
+        if not os.path.isdir(os.path.join(self.cfg.DATA.PATH_TO_DATA_DIR, path_prefix)):
+            path_prefix = mode_name
+            
+        path_to_file = os.path.join(
+            self.cfg.DATA.PATH_TO_DATA_DIR, 'meta', data_file_name
+        )
+        assert PathManager.exists(path_to_file), "{} dir not found".format(
+            path_to_file
+        )
+        path_to_fps_file = os.path.join(
+            self.cfg.DATA.PATH_TO_DATA_DIR, 'meta', fps_data_file_name
+        )
+                
+        if not PathManager.exists(path_to_fps_file):
+            print("{} dir not found, fps will not be used".format(path_to_fps_file))
+            fps_data_dict = None
+        else:
+            fps_data_dict = {}
+            with PathManager.open(path_to_fps_file, "r") as f:
+                for path_fps in f.read().splitlines():
+                    
+                    assert (
+                        len(path_fps.split(self.cfg.DATA.PATH_LABEL_SEPARATOR))
+                        == 2
+                    )
+                    path, fps = path_fps.split(
+                        self.cfg.DATA.PATH_LABEL_SEPARATOR
+                    )
+                    fps_data_dict[path] = float(fps)
+            logger.info(
+                f"Parsed {len(fps_data_dict.keys())} meta_fps"
+            )
+        
+        self._path_to_videos = []
+        self._labels = []
+        self._spatial_temporal_idx = []
+        num_skipped_videos = 0 
+        with PathManager.open(path_to_file, "r") as f:
+            clip_idx = 0 
+            for path_label in f.read().splitlines():
+                assert (
+                    len(path_label.split(self.cfg.DATA.PATH_LABEL_SEPARATOR))
+                     == 3
+                )
+                path, num_frames, label = path_label.split(
+                    self.cfg.DATA.PATH_LABEL_SEPARATOR
+                )
+                num_frames = int(num_frames)
+                if num_frames < 3:
+                    num_skipped_videos+=1
+                    continue
+                for idx in range(self._num_clips):
+                    self._path_to_videos.append(
+                        os.path.join(self.cfg.DATA.PATH_TO_DATA_DIR, path_prefix, path)
+                    )
+                    self._labels.append(int(label))
+                    self._spatial_temporal_idx.append(idx)
+                    self._video_meta[clip_idx * self._num_clips + idx] = {
+                        'num_frames': num_frames
+                    }
+                    if fps_data_dict is not None:
+                        self._video_meta[clip_idx * self._num_clips + idx]['fps'] = \
+                        fps_data_dict[path]
+                clip_idx += 1
+        assert (
+            len(self._path_to_videos) > 0
+        ), "Failed to load Kinetics split {} from {}".format(
+            self._split_idx, path_to_file
+        )
+        logger.info(
+            "Constructing kinetics dataloader (size: {}) from {}".format(
+                len(self._path_to_videos), path_to_file
+            )
+        )
+        logger.info(
+            f"Number of videos skipeed: {num_skipped_videos}"
         )
 
     def __getitem__(self, index):
@@ -194,43 +286,64 @@ class Kinetics(torch.utils.data.Dataset):
         # Try to decode and sample a clip from a video. If the video can not be
         # decoded, repeatly find a random video replacement that can be decoded.
         for i_try in range(self._num_retries):
-            video_container = None
-            try:
-                video_container = container.get_video_container(
-                    self._path_to_videos[index],
-                    self.cfg.DATA_LOADER.ENABLE_MULTI_THREAD_DECODE,
-                    self.cfg.DATA.DECODING_BACKEND,
-                )
-            except Exception as e:
-                logger.info(
-                    "Failed to load video from {} with error {}".format(
-                        self._path_to_videos[index], e
+            # Decode from hdf5
+            if self.use_hdf5:
+                frames = None
+                with h5py.File(f'{self._path_to_videos[index]}.h5', 'r') as video_h5:
+                    video_key = list(video_h5.keys())[0]
+                    
+                    frames = image_decoder.decode(
+                        video_h5,
+                        video_key,
+                        sampling_rate,
+                        self.cfg.DATA.NUM_FRAMES,
+                        temporal_sample_index,
+                        self.cfg.TEST.NUM_ENSEMBLE_VIEWS,
+                        video_meta=self._video_meta[index],
+                        target_fps=self.cfg.DATA.TARGET_FPS,
+                        max_spatial_scale=max_scale,
                     )
-                )
-            # Select a random video if the current video was not able to access.
-            if video_container is None:
-                logger.warning(
-                    "Failed to meta load video idx {} from {}; trial {}".format(
-                        index, self._path_to_videos[index], i_try
+                    
+                if frames is None:
+                    continue
+            else:
+                video_container = None
+                try:
+                    video_container = container.get_video_container(
+                        self._path_to_videos[index],
+                        self.cfg.DATA_LOADER.ENABLE_MULTI_THREAD_DECODE,
+                        self.cfg.DATA.DECODING_BACKEND,
                     )
-                )
-                if self.mode not in ["test"] and i_try > self._num_retries // 2:
-                    # let's try another one
-                    index = random.randint(0, len(self._path_to_videos) - 1)
-                continue
+                except Exception as e:
+                    logger.info(
+                        "Failed to load video from {} with error {}".format(
+                            self._path_to_videos[index], e
+                        )
+                    )
+                # Select a random video if the current video was not able to access.
+                if video_container is None:
+                    logger.warning(
+                        "Failed to meta load video idx {} from {}; trial {}".format(
+                            index, self._path_to_videos[index], i_try
+                        )
+                    )
+                    if self.mode not in ["test"] and i_try > self._num_retries // 2:
+                        # let's try another one
+                        index = random.randint(0, len(self._path_to_videos) - 1)
+                    continue
 
-            # Decode video. Meta info is used to perform selective decoding.
-            frames = decoder.decode(
-                video_container,
-                sampling_rate,
-                self.cfg.DATA.NUM_FRAMES,
-                temporal_sample_index,
-                self.cfg.TEST.NUM_ENSEMBLE_VIEWS,
-                video_meta=self._video_meta[index],
-                target_fps=self.cfg.DATA.TARGET_FPS,
-                backend=self.cfg.DATA.DECODING_BACKEND,
-                max_spatial_scale=min_scale,
-            )
+                # Decode video. Meta info is used to perform selective decoding.
+                frames = decoder.decode(
+                    video_container,
+                    sampling_rate,
+                    self.cfg.DATA.NUM_FRAMES,
+                    temporal_sample_index,
+                    self.cfg.TEST.NUM_ENSEMBLE_VIEWS,
+                    video_meta=self._video_meta[index],
+                    target_fps=self.cfg.DATA.TARGET_FPS,
+                    backend=self.cfg.DATA.DECODING_BACKEND,
+                    max_spatial_scale=min_scale,
+                )
 
             # If decoding failed (wrong format, video is too short, and etc),
             # select another video.
@@ -261,7 +374,6 @@ class Kinetics(torch.utils.data.Dataset):
                 random_horizontal_flip=self.cfg.DATA.RANDOM_FLIP,
                 inverse_uniform_sampling=self.cfg.DATA.INV_UNIFORM_SAMPLE,
             )
-
             label = self._labels[index]
             frames = utils.pack_pathway_output(self.cfg, frames)
             return frames, label, index, {}

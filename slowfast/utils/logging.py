@@ -47,7 +47,8 @@ def setup_logging(output_dir=None):
         logging.root.handlers = []
     else:
         # Suppress logging for non-master processes.
-        _suppress_print()
+        if False:
+            _suppress_print()
 
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)

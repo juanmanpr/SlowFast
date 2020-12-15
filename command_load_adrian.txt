@@ -1,0 +1,8 @@
+python -W ignore tools/run_net.py \
+        --init_method tcp://localhost:9998 \
+        --cfg configs/Kinetics/SLOW_8x8_R50.yaml NUM_GPUS 4 TRAIN.BATCH_SIZE 128 \
+        SOLVER.BASE_LR 0.0125 DATA.PATH_TO_DATA_DIR /home/nfs/datasets/Kinetics400 \
+        TRAIN.CHECKPOINT_FILE_PATH /home/nfs/adrian.bulat/checkpoint_unsup1/checkpoint_epoch_00196.pyth \
+        TRAIN.CHECKPOINT_EPOCH_RESET True \
+        
+        
