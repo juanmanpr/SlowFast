@@ -117,3 +117,4 @@ best_submission/*
 .vscode
 
 vis/*.jpg
+checkpoints/*

@@ -28,10 +28,14 @@ def construct_optimizer(model, cfg):
     # Non-batchnorm parameters.
     non_bn_parameters = []
     for name, p in model.named_parameters():
-        if "bn" in name:
-            bn_params.append(p)
-        else:
+        if cfg.SOLVER.LINEAR_ONLY:
+          if "head" in name:
             non_bn_parameters.append(p)
+        else:
+          if "bn" in name:
+            bn_params.append(p)
+          else:
+            non_bn_parameters.append(p)                
     # Apply different weight decay to Batchnorm and non-batchnorm parameters.
     # In Caffe2 classification codebase the weight decay for batchnorm is 0.0.
     # Having a different weight decay on batchnorm might cause a performance
@@ -41,11 +45,13 @@ def construct_optimizer(model, cfg):
         {"params": non_bn_parameters, "weight_decay": cfg.SOLVER.WEIGHT_DECAY},
     ]
     # Check all parameters will be passed into optimizer.
-    assert len(list(model.parameters())) == len(non_bn_parameters) + len(
-        bn_params
-    ), "parameter size does not match: {} + {} != {}".format(
-        len(non_bn_parameters), len(bn_params), len(list(model.parameters()))
-    )
+    if not cfg.SOLVER.LINEAR_ONLY:
+        assert len(list(model.parameters())) == len(non_bn_parameters) + len(
+            bn_params
+        ), "parameter size does not match: {} + {} != {}".format(
+            len(non_bn_parameters), len(bn_params), len(list(model.parameters()))
+        )
+        
 
     if cfg.SOLVER.OPTIMIZING_METHOD == "sgd":
         return torch.optim.SGD(
