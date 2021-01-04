@@ -47,10 +47,10 @@ def construct_optimizer(model, cfg):
     # Check all parameters will be passed into optimizer.
     if not cfg.SOLVER.LINEAR_ONLY:
         assert len(list(model.parameters())) == len(non_bn_parameters) + len(
-            bn_params
-        ), "parameter size does not match: {} + {} != {}".format(
-            len(non_bn_parameters), len(bn_params), len(list(model.parameters()))
-        )
+                bn_params
+            ), "parameter size does not match: {} + {} != {}".format(
+                len(non_bn_parameters), len(bn_params), len(list(model.parameters()))
+            )
         
 
     if cfg.SOLVER.OPTIMIZING_METHOD == "sgd":
