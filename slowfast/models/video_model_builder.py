@@ -398,6 +398,7 @@ class SlowFast(nn.Module):
         x = self.s4(x)
         x = self.s4_fuse(x)
         x = self.s5(x)
+                
         if self.enable_detection:
             x = self.head(x, bboxes)
         else:
@@ -593,6 +594,7 @@ class ResNet(nn.Module):
         x = self.s3(x)
         x = self.s4(x)
         x = self.s5(x)
+        
         if self.enable_detection:
             x = self.head(x, bboxes)
         else:

@@ -203,7 +203,7 @@ class ResNetBasicHead(nn.Module):
         for pathway in range(self.num_pathways):
             m = getattr(self, "pathway{}_avgpool".format(pathway))
             pool_out.append(m(inputs[pathway]))
-        x = torch.cat(pool_out, 1)
+        x = torch.cat(pool_out, 1)        
         # (N, C, T, H, W) -> (N, T, H, W, C).
         x = x.permute((0, 2, 3, 4, 1))
         # Perform dropout.
@@ -217,6 +217,7 @@ class ResNetBasicHead(nn.Module):
             x = x.mean([1, 2, 3])
 
         x = x.view(x.shape[0], -1)
+        
         return x
 
 

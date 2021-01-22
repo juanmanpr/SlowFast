@@ -72,6 +72,8 @@ def train_epoch(
             preds = model(inputs, meta["boxes"])
         else:
             preds = model(inputs)
+            #print(torch.argmax(preds, dim=1))
+            
         # Explicitly declare reduction to mean.
         loss_fun = losses.get_loss_func(cfg.MODEL.LOSS_FUNC)(reduction="mean")
 

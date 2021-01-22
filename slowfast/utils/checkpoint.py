@@ -184,6 +184,7 @@ def load_checkpoint(
     convert_from_caffe2=False,
     epoch_reset=False,
     clear_name_pattern=(),
+    load_projection=True
 ):
     """
     Load the checkpoint from the given file. If inflation is True, inflate the
@@ -315,11 +316,18 @@ def load_checkpoint(
             pre_train_dict = checkpoint["model_state"]
             model_dict = ms.state_dict()
             # Match pre-trained weights that have same shape as current model.
-            pre_train_dict_match = {
+            pre_train_dict_match_buffer = {
                 k: v
                 for k, v in pre_train_dict.items()
                 if k in model_dict and v.size() == model_dict[k].size()
             }
+            pre_train_dict_match = {}
+            for k in pre_train_dict_match_buffer:
+                if 'projection' in k and not load_projection:
+                    continue
+                else:
+                    pre_train_dict_match[k] = pre_train_dict_match_buffer[k]
+
             # Weights that do not have match from the pre-trained model.
             not_load_layers = [
                 k
@@ -506,6 +514,7 @@ def load_train_checkpoint(cfg, model, optimizer):
             convert_from_caffe2=cfg.TRAIN.CHECKPOINT_TYPE == "caffe2",
             epoch_reset=cfg.TRAIN.CHECKPOINT_EPOCH_RESET,
             clear_name_pattern=cfg.TRAIN.CHECKPOINT_CLEAR_NAME_PATTERN,
+            load_projection=not cfg.SOLVER.LINEAR_ONLY,
         )
         start_epoch = checkpoint_epoch + 1
     else:

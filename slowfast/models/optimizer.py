@@ -31,19 +31,27 @@ def construct_optimizer(model, cfg):
         if cfg.SOLVER.LINEAR_ONLY:
           if "head" in name:
             non_bn_parameters.append(p)
+            print(f'!!!!!!!!! HEAD PARAMETER : {name}', p)
         else:
           if "bn" in name:
             bn_params.append(p)
           else:
             non_bn_parameters.append(p)                
+    #exit()
     # Apply different weight decay to Batchnorm and non-batchnorm parameters.
     # In Caffe2 classification codebase the weight decay for batchnorm is 0.0.
     # Having a different weight decay on batchnorm might cause a performance
     # drop.
-    optim_params = [
-        {"params": bn_params, "weight_decay": cfg.BN.WEIGHT_DECAY},
-        {"params": non_bn_parameters, "weight_decay": cfg.SOLVER.WEIGHT_DECAY},
-    ]
+    if not cfg.SOLVER.LINEAR_ONLY:
+        optim_params = [
+            {"params": bn_params, "weight_decay": cfg.BN.WEIGHT_DECAY},
+            {"params": non_bn_parameters, "weight_decay": cfg.SOLVER.WEIGHT_DECAY},
+        ]
+    else:
+        optim_params = [
+            {"params": non_bn_parameters, "weight_decay": cfg.SOLVER.WEIGHT_DECAY},
+        ]
+        
     # Check all parameters will be passed into optimizer.
     if not cfg.SOLVER.LINEAR_ONLY:
         assert len(list(model.parameters())) == len(non_bn_parameters) + len(
