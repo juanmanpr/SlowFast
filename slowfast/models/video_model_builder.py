@@ -586,6 +586,10 @@ class ResNet(nn.Module):
             )
 
     def forward(self, x, bboxes=None):
+
+
+        print(f'o=> Shape of input {x.shape}')
+
         x = self.s1(x)
         x = self.s2(x)
         for pathway in range(self.num_pathways):

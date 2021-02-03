@@ -6,6 +6,7 @@
 import copy
 import numpy as np
 import os
+import re
 import pickle
 from collections import OrderedDict
 import torch
@@ -135,6 +136,13 @@ def save_checkpoint(path_to_job, model, optimizer, epoch, cfg):
         torch.save(checkpoint, f)
     return path_to_checkpoint
 
+def extract_values(inp, regex):
+    matches = re.finditer(regex, inp, re.MULTILINE)
+
+    for matchNum, match in enumerate(matches, start=1):
+        numbers = [int(num) for num in match.groups()]
+        print(match, numbers)
+        return numbers
 
 def inflate_weight(state_dict_2d, state_dict_3d):
     """
@@ -148,8 +156,49 @@ def inflate_weight(state_dict_2d, state_dict_3d):
     Returns:
         state_dict_inflated (OrderedDict): a dict of inflated parameters.
     """
+
+    # adjust the 2d dict
+    temp_dict = {}
+    for k, v in state_dict_2d.items():
+        if 'module.base_net.' in k and not '.layer' in k:
+            k = k.replace('module.base_net.','s1.pathway0_stem.')
+            k = k.replace('conv1', 'conv')
+            k = k.replace('bn1', 'bn')
+
+        for d_idx in range(1,5,1):
+            k = k.replace(f'module.base_net.layer{d_idx}.0.downsample.0.', f's{d_idx+1}.pathway0_res0.branch1.')
+            k = k.replace(f'module.base_net.layer{d_idx}.0.downsample.1.', f's{d_idx+1}.pathway0_res0.branch1_bn.')
+
+        numbers = extract_values(k, regex = r"module.base_net.layer(\d+)\.(\d+)\.conv(\d+)")
+        if numbers is not None:
+            if numbers[2] == 1:
+                letter = 'a'
+            elif numbers[2] == 2:
+                letter = 'b'
+            elif numbers[2] == 3:
+                letter = 'c'
+            k = f's{numbers[0]+1}.pathway0_res{numbers[1]}.branch2.{letter}.weight'
+
+        numbers = extract_values(k, regex = r"module.base_net.layer(\d+)\.(\d+)\.bn(\d+)")
+        if numbers is not None:
+            if numbers[2] == 1:
+                letter = 'a'
+            elif numbers[2] == 2:
+                letter = 'b'
+            elif numbers[2] == 3:
+                letter = 'c'
+            k = k.replace(f'module.base_net.layer{numbers[0]}.{numbers[1]}.bn{numbers[2]}.', f's{numbers[0]+1}.pathway0_res{numbers[1]}.branch2.{letter}_bn.')
+ 
+        if 'projector' in k or 'predictor' in k:
+            continue
+
+        temp_dict[k] = v 
+
+    state_dict_2d = temp_dict  
+    print('===')
     state_dict_inflated = OrderedDict()
     for k, v2d in state_dict_2d.items():
+        print(k)
         assert k in state_dict_3d.keys()
         v3d = state_dict_3d[k]
         # Inflate the weight of 2D conv to 3D conv.
@@ -173,6 +222,7 @@ def inflate_weight(state_dict_2d, state_dict_3d):
             )
         state_dict_inflated[k] = v3d.clone()
     return state_dict_inflated
+
 
 
 def load_checkpoint(
@@ -287,13 +337,14 @@ def load_checkpoint(
         model_state_dict_3d = (
             model.module.state_dict() if data_parallel else model.state_dict()
         )
-        checkpoint["model_state"] = normal_to_sub_bn(
-            checkpoint["model_state"], model_state_dict_3d
+        key_name = 'model_state' if 'model_state' in checkpoint else 'state_dict'
+        checkpoint[key_name] = normal_to_sub_bn(
+            checkpoint[key_name], model_state_dict_3d
         )
         if inflation:
             # Try to inflate the model.
             inflated_model_dict = inflate_weight(
-                checkpoint["model_state"], model_state_dict_3d
+                checkpoint[key_name], model_state_dict_3d
             )
             ms.load_state_dict(inflated_model_dict, strict=False)
         else:
